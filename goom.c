@@ -1,94 +1,123 @@
+#include <stdint.h>
+#include <stdbool.h>
+
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
 
-const float note_duty[85] = {
-4.166666666666666,
-5.555555555555556,
-5.555555555555556,
-6.944444444444444,
-8.333333333333332,
-8.333333333333332,
-9.722222222222221,
-11.111111111111112,
-12.5,
-12.5,
-13.88888888888889,
-15.277777777777777,
-15.277777777777777,
-16.666666666666664,
-18.055555555555554,
-18.055555555555554,
-19.444444444444446,
-20.833333333333336,
-22.22222222222222,
-22.22222222222222,
-23.611111111111114,
-25.0,
-25.0,
-26.38888888888889,
-27.777777777777775,
-29.166666666666668,
-29.166666666666668,
-30.555555555555557,
-31.944444444444443,
-31.944444444444443,
-33.33333333333333,
-34.722222222222214,
-34.722222222222214,
-36.111111111111114,
-37.5,
-38.888888888888886,
-38.888888888888886,
-40.277777777777786,
-41.66666666666667,
-41.66666666666667,
-43.05555555555555,
-44.44444444444445,
-45.83333333333333,
-45.83333333333333,
-47.222222222222214,
-48.611111111111114,
-48.611111111111114,
-50.0,
-51.38888888888889,
-51.38888888888889,
-52.77777777777778,
-54.166666666666664,
-55.55555555555556,
-55.55555555555556,
-56.94444444444444,
-58.333333333333336,
-58.333333333333336,
-59.72222222222222,
-61.11111111111111,
-62.5,
-62.5,
-63.88888888888889,
-65.27777777777779,
-65.27777777777779,
-66.66666666666666,
-68.05555555555557,
-68.05555555555557,
-69.44444444444443,
-70.83333333333334,
-72.22222222222223,
-72.22222222222223,
-73.6111111111111,
-75.0,
-75.0,
-76.3888888888889,
-77.77777777777777,
-79.16666666666666,
-79.16666666666666,
-80.55555555555557,
-81.94444444444443,
-81.94444444444443,
-83.33333333333334,
-84.72222222222221,
-84.72222222222221,
-86.11111111111111};
+#include "bsp/board.h"
+#include "tusb.h"
 
-int main() {
+#include "consts.h"
+
+enum  {
+  BLINK_NOT_MOUNTED = 250,
+  BLINK_MOUNTED = 1000,
+  BLINK_SUSPENDED = 2500,
+};
+
+static uint32_t blink_interval_ms = BLINK_NOT_MOUNTED;
+
+void handleNoteOn(uint8_t channel, uint8_t note, uint8_t velocity, uint slice_num) {
+
+    board_led_write(1);
+
+    // One percent of 1 KHz wrap
+    int one_percent_duty = 480;
+
+    int duty_cycle = (int)(one_percent_duty * note_duty[note - 12]);
+
+    pwm_set_chan_level(slice_num, PWM_CHAN_A, duty_cycle);
+
+}
+
+void handleNoteOff(uint8_t channel, uint8_t note, uint8_t velocity, uint slice_num) {
+
+    board_led_write(0);
+    pwm_set_chan_level(slice_num, PWM_CHAN_A, 0);
+
+}
+
+// Invoked when device is mounted
+void tud_mount_cb(void)
+{
+  blink_interval_ms = BLINK_MOUNTED;
+}
+
+// Invoked when device is unmounted
+void tud_umount_cb(void)
+{
+  blink_interval_ms = BLINK_NOT_MOUNTED;
+}
+
+// Invoked when usb bus is suspended
+// remote_wakeup_en : if host allow us  to perform remote wakeup
+// Within 7ms, device must draw an average of current less than 2.5 mA from bus
+void tud_suspend_cb(bool remote_wakeup_en)
+{
+  (void) remote_wakeup_en;
+  blink_interval_ms = BLINK_SUSPENDED;
+}
+
+// Invoked when usb bus is resumed
+void tud_resume_cb(void)
+{
+  blink_interval_ms = tud_mounted() ? BLINK_MOUNTED : BLINK_NOT_MOUNTED;
+}
+
+// volatile bool midi_received = false;
+//
+// void tud_midi_rx_cb(uint8_t itf) {
+//     if (tud_midi_available()) {
+//
+//         uint8_t midi_buf[32];
+//         uint32_t count = tud_midi_stream_read(midi_buf, sizeof(midi_buf));
+//
+//         midi_received = true;
+//
+//     }
+// }
+
+void handle_midi(uint slice_num)
+{
+    uint8_t midi_buf[32];
+    uint32_t length = tud_midi_stream_read(midi_buf, sizeof(midi_buf));
+
+    for (uint32_t i = 0; i < length; i += 4) {
+
+        // byte 0: Cable Number and Code Index Number
+        // byte 1: MIDI note number (or first data byte)
+        // byte 2: MIDI note velocity (or second data byte)
+
+        // First 4 bits
+        uint8_t status = midi_buf[i] & 0xF0;
+
+        // Second 4 bits
+        uint8_t channel = midi_buf[i] & 0x0F;
+
+        uint8_t note = midi_buf[i + 1];
+        uint8_t velocity = midi_buf[i + 2];
+
+        switch (status) {
+            case MIDI_NOTE_ON:
+                if (velocity == 0) {
+                    handleNoteOff(channel, note, velocity, slice_num);
+                } else {
+                    handleNoteOn(channel, note, velocity, slice_num);
+                }
+                break;
+            case MIDI_NOTE_OFF:
+                handleNoteOff(channel, note, velocity, slice_num);
+                break;
+            default:
+                // Handle other MIDI messages if needed
+                break;
+        }
+    }
+
+}
+
+uint pwm_out_init()
+{
     // Initialize the standard library, which also configures the GPIOs.
     stdio_init_all();
 
@@ -108,16 +137,24 @@ int main() {
     // Enable PWM.
     pwm_set_enabled(slice_num, true);
 
-    float percent_duty = 480;
+    return slice_num;
+
+}
+
+int main() {
+
+    board_init();
+    tusb_init();
+
+    uint slice_num = pwm_out_init();
 
     while (1) {
 
-        for (uint16_t note = 1; note < 86; note++) {
+        tud_task();
 
-            int duty_cycle = (int)(percent_duty * note);
+        if (tud_midi_available()) {
+            handle_midi(slice_num);
 
-            pwm_set_chan_level(slice_num, PWM_CHAN_A, duty_cycle);
-            sleep_ms(1000);
         }
 
     }
