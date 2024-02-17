@@ -1,36 +1,33 @@
 cmake_minimum_required(VERSION 3.13)
 
 # initialize pico-sdk from GIT
-# (note this can come from environment, CMake cache etc)
 set(PICO_SDK_FETCH_FROM_GIT on)
 
 # pico_sdk_import.cmake is a single file copied from this SDK
-# note: this must happen before project()
 include(pico_sdk_import.cmake)
-# include(example_auto_set_url.cmake)
 
-project(goom)
+project(goom C CXX ASM)
 
-# initialize the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-if (TARGET tinyusb_device)
-    add_executable(goom
-            goom.c
-            )
+set(FAMILY rp2040)
+set(BOARD pico_sdk)
+set(TINYUSB_FAMILY_PROJECT_NAME_PREFIX "tinyusb_dev_")
 
-    # pull in common dependencies
-    target_link_libraries(goom
-                          pico_stdlib
-                          hardware_pwm)
+# Initialize the executable without specifying sources here
+add_executable(goom)
 
-    # enable usb output, disable uart output
-    pico_enable_stdio_usb(goom 1)
-    pico_enable_stdio_uart(goom 0)
+# Add all source files
+target_sources(goom PUBLIC
+        ${CMAKE_CURRENT_LIST_DIR}/src/goom.c
+        ${CMAKE_CURRENT_LIST_DIR}/src/usb_descriptors.c)
 
-    # create map/bin/hex/uf2 file etc.
-    pico_add_extra_outputs(goom)
+# Include directory for header files
+target_include_directories(goom PUBLIC
+        ${CMAKE_CURRENT_LIST_DIR}/src)
 
-elseif(PICO_ON_DEVICE)
-    message(WARNING "not building pico_water because TinyUSB submodule is not initialized in the SDK")
-endif()
+# Link libraries
+target_link_libraries(goom PUBLIC pico_stdlib pico_unique_id tinyusb_device tinyusb_board hardware_pwm)
+
+# Generate extra outputs (map/bin/hex/uf2)
+pico_add_extra_outputs(goom)

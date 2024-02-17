@@ -21,8 +21,8 @@ void handleNoteOn(uint8_t channel, uint8_t note, uint8_t velocity, uint slice_nu
 
     board_led_write(1);
 
-    // One percent of 1 KHz wrap
-    int one_percent_duty = 480;
+    // One percent of 100 KHz wrap
+    int one_percent_duty = 12;
 
     int duty_cycle = (int)(one_percent_duty * note_duty[note - 12]);
 
@@ -130,9 +130,8 @@ uint pwm_out_init()
     // Retrieve the PWM slice for the chosen GPIO.
     uint slice_num = pwm_gpio_to_slice_num(PWM_PIN);
 
-    // Set the PWM frequency.
-    // For example, to have a 1kHz frequency, we set a wrap value of 47999.
-    pwm_set_wrap(slice_num, 47999);  // 1ms period at 48MHz system clock.
+    // Set the PWM frequency to 100kHz.
+    pwm_set_wrap(slice_num, 1248);  // For 100kHz frequency at 125MHz system clock.
 
     // Enable PWM.
     pwm_set_enabled(slice_num, true);
